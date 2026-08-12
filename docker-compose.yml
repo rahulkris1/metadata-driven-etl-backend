@@ -1,0 +1,32 @@
+services:
+  api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      METADATA_DATABASE_URL: postgresql+psycopg://etl:etl@metadata-db:5432/etl_metadata
+    ports:
+      - "8000:8000"
+    depends_on:
+      metadata-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  metadata-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: etl_metadata
+      POSTGRES_USER: etl
+      POSTGRES_PASSWORD: etl
+    ports:
+      - "5432:5432"
+    volumes:
+      - metadata-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U etl -d etl_metadata"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  metadata-db-data:
