@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -32,7 +33,7 @@ def _error_response(
     }
     if details is not None:
         content["error"]["details"] = details
-    return JSONResponse(status_code=status_code, content=content)
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(content))
 
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:

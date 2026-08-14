@@ -1,8 +1,9 @@
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.models.enums import SourceType
 from app.models.metadata import (
     Connection,
     Dataset,
@@ -23,7 +24,41 @@ class SourceRepository(Repository[Source]):
         super().__init__(session, Source)
 
     def get_by_name(self, name: str) -> Source | None:
-        return self.session.scalar(select(Source).where(Source.name == name.strip()))
+        return self.session.scalar(
+            select(Source).where(func.lower(Source.name) == name.strip().lower())
+        )
+
+    def paginate(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        search: str | None = None,
+        source_type: SourceType | None = None,
+        is_active: bool | None = None,
+    ) -> tuple[Sequence[Source], int]:
+        filters = []
+        if search:
+            pattern = f"%{search.strip()}%"
+            filters.append(
+                or_(Source.name.ilike(pattern), Source.description.ilike(pattern))
+            )
+        if source_type is not None:
+            filters.append(Source.source_type == source_type)
+        if is_active is not None:
+            filters.append(Source.is_active.is_(is_active))
+
+        total = self.session.scalar(
+            select(func.count()).select_from(Source).where(*filters)
+        ) or 0
+        items = self.session.scalars(
+            select(Source)
+            .where(*filters)
+            .order_by(Source.name.asc(), Source.id.asc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        return items, total
 
 
 class ConnectionRepository(Repository[Connection]):
