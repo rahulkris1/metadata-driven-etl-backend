@@ -1,12 +1,14 @@
 """Metadata database models exported for application and Alembic discovery."""
 
 from app.models.metadata import (
+    ColumnMapping,
     Connection,
     Dataset,
     DatasetColumn,
     Execution,
     IncrementalConfiguration,
     Pipeline,
+    PipelineDependency,
     PipelineStep,
     QualityRule,
     Source,
@@ -15,6 +17,7 @@ from app.models.metadata import (
 from app.models.validation import MetadataValidationError
 
 __all__ = [
+    "ColumnMapping",
     "Connection",
     "Dataset",
     "DatasetColumn",
@@ -22,6 +25,7 @@ __all__ = [
     "IncrementalConfiguration",
     "MetadataValidationError",
     "Pipeline",
+    "PipelineDependency",
     "PipelineStep",
     "QualityRule",
     "Source",

@@ -5,12 +5,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.enums import SourceType
 from app.models.metadata import (
+    ColumnMapping,
     Connection,
     Dataset,
     DatasetColumn,
     Execution,
     IncrementalConfiguration,
     Pipeline,
+    PipelineDependency,
     PipelineStep,
     QualityRule,
     Source,
@@ -78,19 +80,72 @@ class PipelineRepository(Repository[Pipeline]):
         super().__init__(session, Pipeline)
 
     def get_by_name(self, name: str) -> Pipeline | None:
-        return self.session.scalar(select(Pipeline).where(Pipeline.name == name.strip()))
+        return self.session.scalar(
+            select(Pipeline).where(func.lower(Pipeline.name) == name.strip().lower())
+        )
 
     def get_with_steps(self, pipeline_id: str) -> Pipeline | None:
         return self.session.scalar(
             select(Pipeline)
-            .options(selectinload(Pipeline.steps))
+            .options(
+                selectinload(Pipeline.steps).selectinload(PipelineStep.transformations),
+                selectinload(Pipeline.steps).selectinload(PipelineStep.mappings),
+                selectinload(Pipeline.dependencies),
+                selectinload(Pipeline.incremental_config),
+            )
             .where(Pipeline.id == pipeline_id)
         )
+
+    def paginate(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        search: str | None = None,
+        is_active: bool | None = None,
+    ) -> tuple[Sequence[Pipeline], int]:
+        filters = []
+        if search:
+            pattern = f"%{search.strip()}%"
+            filters.append(
+                or_(Pipeline.name.ilike(pattern), Pipeline.description.ilike(pattern))
+            )
+        if is_active is not None:
+            filters.append(Pipeline.is_active.is_(is_active))
+        total = self.session.scalar(
+            select(func.count()).select_from(Pipeline).where(*filters)
+        ) or 0
+        items = self.session.scalars(
+            select(Pipeline)
+            .where(*filters)
+            .order_by(Pipeline.name.asc(), Pipeline.id.asc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        return items, total
+
+    def dependency_edges(self, *, exclude_pipeline_id: str | None = None) -> list[tuple[str, str]]:
+        statement = select(
+            PipelineDependency.pipeline_id, PipelineDependency.depends_on_pipeline_id
+        ).where(PipelineDependency.is_active.is_(True))
+        if exclude_pipeline_id is not None:
+            statement = statement.where(PipelineDependency.pipeline_id != exclude_pipeline_id)
+        return list(self.session.execute(statement).tuples())
 
 
 class PipelineStepRepository(Repository[PipelineStep]):
     def __init__(self, session: Session) -> None:
         super().__init__(session, PipelineStep)
+
+
+class ColumnMappingRepository(Repository[ColumnMapping]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, ColumnMapping)
+
+
+class PipelineDependencyRepository(Repository[PipelineDependency]):
+    def __init__(self, session: Session) -> None:
+        super().__init__(session, PipelineDependency)
 
 
 class DatasetRepository(Repository[Dataset]):

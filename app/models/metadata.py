@@ -21,8 +21,10 @@ from app.core.database import Base
 from app.models.base import ActiveStateMixin, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import (
     DatasetType,
+    DependencyType,
     ExecutionStatus,
     IncrementalStrategy,
+    LoadStrategy,
     QualitySeverity,
     SourceType,
     StepType,
@@ -67,6 +69,9 @@ class Pipeline(UUIDPrimaryKeyMixin, TimestampMixin, ActiveStateMixin, Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     schedule: Mapped[str | None] = mapped_column(String(120))
+    schedule_timezone: Mapped[str] = mapped_column(
+        String(64), default="UTC", server_default="UTC", nullable=False
+    )
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
     steps: Mapped[list[PipelineStep]] = relationship(
@@ -76,6 +81,15 @@ class Pipeline(UUIDPrimaryKeyMixin, TimestampMixin, ActiveStateMixin, Base):
         back_populates="pipeline", cascade="all, delete-orphan", uselist=False
     )
     executions: Mapped[list[Execution]] = relationship(back_populates="pipeline")
+    dependencies: Mapped[list[PipelineDependency]] = relationship(
+        back_populates="pipeline",
+        cascade="all, delete-orphan",
+        foreign_keys="PipelineDependency.pipeline_id",
+    )
+    dependents: Mapped[list[PipelineDependency]] = relationship(
+        back_populates="depends_on_pipeline",
+        foreign_keys="PipelineDependency.depends_on_pipeline_id",
+    )
 
 
 class PipelineStep(UUIDPrimaryKeyMixin, TimestampMixin, ActiveStateMixin, Base):
@@ -94,10 +108,26 @@ class PipelineStep(UUIDPrimaryKeyMixin, TimestampMixin, ActiveStateMixin, Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    source_dataset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("datasets.id", ondelete="SET NULL"), index=True
+    )
+    target_dataset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("datasets.id", ondelete="SET NULL"), index=True
+    )
+    load_strategy: Mapped[LoadStrategy | None] = mapped_column(Enum(LoadStrategy))
 
     pipeline: Mapped[Pipeline] = relationship(back_populates="steps")
     transformations: Mapped[list[Transformation]] = relationship(
         back_populates="step", cascade="all, delete-orphan"
+    )
+    mappings: Mapped[list[ColumnMapping]] = relationship(
+        back_populates="step", cascade="all, delete-orphan"
+    )
+    source_dataset: Mapped[Dataset | None] = relationship(
+        foreign_keys=[source_dataset_id], back_populates="source_steps"
+    )
+    target_dataset: Mapped[Dataset | None] = relationship(
+        foreign_keys=[target_dataset_id], back_populates="target_steps"
     )
 
 
@@ -135,6 +165,12 @@ class Dataset(UUIDPrimaryKeyMixin, TimestampMixin, ActiveStateMixin, Base):
     )
     quality_rules: Mapped[list[QualityRule]] = relationship(
         back_populates="dataset", cascade="all, delete-orphan"
+    )
+    source_steps: Mapped[list[PipelineStep]] = relationship(
+        foreign_keys="PipelineStep.source_dataset_id", back_populates="source_dataset"
+    )
+    target_steps: Mapped[list[PipelineStep]] = relationship(
+        foreign_keys="PipelineStep.target_dataset_id", back_populates="target_dataset"
     )
 
 
@@ -183,6 +219,51 @@ class Transformation(UUIDPrimaryKeyMixin, TimestampMixin, ActiveStateMixin, Base
     )
     output_dataset: Mapped[Dataset | None] = relationship(
         back_populates="transformations_out", foreign_keys=[output_dataset_id]
+    )
+
+
+class ColumnMapping(UUIDPrimaryKeyMixin, TimestampMixin, ActiveStateMixin, Base):
+    __tablename__ = "column_mappings"
+    __table_args__ = (
+        UniqueConstraint("step_id", "target_column", name="uq_column_mappings_step_target"),
+    )
+
+    step_id: Mapped[str] = mapped_column(
+        ForeignKey("pipeline_steps.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_column: Mapped[str | None] = mapped_column(String(255))
+    target_column: Mapped[str] = mapped_column(String(255), nullable=False)
+    expression: Mapped[str | None] = mapped_column(Text)
+    data_type: Mapped[str | None] = mapped_column(String(100))
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    step: Mapped[PipelineStep] = relationship(back_populates="mappings")
+
+
+class PipelineDependency(UUIDPrimaryKeyMixin, TimestampMixin, ActiveStateMixin, Base):
+    __tablename__ = "pipeline_dependencies"
+    __table_args__ = (
+        UniqueConstraint(
+            "pipeline_id", "depends_on_pipeline_id", name="uq_pipeline_dependencies_pair"
+        ),
+        CheckConstraint("pipeline_id <> depends_on_pipeline_id", name="not_self_dependency"),
+    )
+
+    pipeline_id: Mapped[str] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    depends_on_pipeline_id: Mapped[str] = mapped_column(
+        ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    dependency_type: Mapped[DependencyType] = mapped_column(
+        Enum(DependencyType), default=DependencyType.SUCCESS, nullable=False
+    )
+
+    pipeline: Mapped[Pipeline] = relationship(
+        back_populates="dependencies", foreign_keys=[pipeline_id]
+    )
+    depends_on_pipeline: Mapped[Pipeline] = relationship(
+        back_populates="dependents", foreign_keys=[depends_on_pipeline_id]
     )
 
 

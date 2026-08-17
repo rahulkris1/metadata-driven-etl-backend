@@ -1,8 +1,9 @@
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from app.models.enums import IncrementalStrategy
+from app.models.enums import IncrementalStrategy, StepType
 from app.models.metadata import (
+    ColumnMapping,
     Dataset,
     DatasetColumn,
     Execution,
@@ -32,6 +33,26 @@ def validate_metadata(session: Session, *_: object) -> None:
 
         if isinstance(instance, PipelineStep) and instance.position < 0:
             raise MetadataValidationError("Pipeline-step position cannot be negative")
+
+        if (
+            isinstance(instance, PipelineStep)
+            and instance.step_type == StepType.LOAD
+            and instance.load_strategy is None
+        ):
+            raise MetadataValidationError("Load steps require a load strategy")
+
+        if isinstance(instance, PipelineStep) and (instance.retry_count or 0) < 0:
+            raise MetadataValidationError("retry_count cannot be negative")
+
+        if isinstance(instance, ColumnMapping):
+            if not instance.target_column.strip():
+                raise MetadataValidationError("Mapping target_column cannot be blank")
+            if not (instance.source_column or "").strip() and not (
+                instance.expression or ""
+            ).strip():
+                raise MetadataValidationError(
+                    "A mapping requires source_column or expression"
+                )
 
         if isinstance(instance, DatasetColumn) and instance.ordinal_position < 0:
             raise MetadataValidationError("Column ordinal position cannot be negative")

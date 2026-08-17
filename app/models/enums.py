@@ -16,6 +16,20 @@ class StepType(StrEnum):
     VALIDATE = "validate"
 
 
+class LoadStrategy(StrEnum):
+    APPEND = "append"
+    OVERWRITE = "overwrite"
+    MERGE = "merge"
+    UPSERT = "upsert"
+    SCD_TYPE_1 = "scd_type_1"
+    SCD_TYPE_2 = "scd_type_2"
+
+
+class DependencyType(StrEnum):
+    SUCCESS = "success"
+    COMPLETION = "completion"
+
+
 class DatasetType(StrEnum):
     TABLE = "table"
     VIEW = "view"
